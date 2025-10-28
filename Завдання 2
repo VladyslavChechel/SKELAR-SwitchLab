@@ -1,0 +1,10 @@
+-- Створюємо таблицю та завантажуємо дані
+
+create table public.events(
+	moderator integer not null,
+	id_request integer primary key,
+	request_time timestamp not null,
+	start_time timestamp not null,
+	finish_time timestamp not null,
+	team varchar(50) not null
+);
