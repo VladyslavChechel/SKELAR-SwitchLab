@@ -4,3 +4,68 @@
       187	160178	2020-09-25 02:58:13	2020-10-02 11:37:16	2020-10-02 11:41:56	wholesale	
       178	160306	2020-09-25 09:44:12	2020-10-02 07:23:09	2020-10-02 07:25:33	retail	
       178	163042	2020-09-30 15:56:08	2020-10-02 07:37:33	2020-10-02 07:47:57	retail	
+
+
+2)    Черновий аналіз даних
+      
+      
+            
+            -- Кількість унікальних модераторів (49)
+            
+            
+            select 
+            	count(distinct moderator) 
+            from public.events 
+            
+            -- Кількість запитів (35 617)
+            
+            
+            select 
+            	count( id_request) 
+            from public.events 
+            
+            -- Перша дата запиту (2020-09-24 07:01:16)
+            
+            
+            select 
+            	min(request_time)
+            from public.events
+            
+            -- Остання дата запиту (2020-12-31 22:11:17)
+            
+            
+            select 
+            	max(request_time)
+            from public.events
+            
+            -- Кількість запитів по командам (retail= 14025; wholesale= 21592 )
+            
+            
+            select 
+            	count(team)
+            from public.events
+            where team = 'wholesale'
+            
+            
+            -- Середній час обробки запиту (00:02:14)
+            
+            select 
+            	avg(finish_time - start_time) as avg_request_time
+            from public.events
+            
+            
+            -- Середній час обробки запиту для retail (00:01:58)
+            
+            select 
+            	avg(finish_time - start_time) as avg_request_time_retail
+            from public.events
+            where team = 'retail'
+            
+            
+            -- Середній час обробки запиту для wholesale (00:02:24)
+            
+            select 
+            	avg(finish_time - start_time) as avg_request_time_wholesale
+            from public.events
+            where team = 'wholesale'
+
