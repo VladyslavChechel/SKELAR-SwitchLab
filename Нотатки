@@ -69,3 +69,81 @@
             from public.events
             where team = 'wholesale'
 
+
+            -- TOP запитів по модераторам 
+
+            select 
+            	count(id_request) as total_requests_by_moderators,
+            	moderator
+            from public.events
+            group by moderator 
+            order by total_requests_by_moderators 
+            -- Модератор № 188 виконав 3746 запитів, інші від 1717 і менше
+            -- Шість операторів виконали 2 запита або менше (ймовірно допомога старших модераторів або керівництва)
+            
+            
+            -- AVG к-ть запитів для retail модератора (584)
+            
+            select 	
+            	round(avg(total_requests_by_retail.count_requests), 0) as avg_requests_retail
+            from (	select
+            			count(id_request) as count_requests,
+            			moderator
+            		from public.events
+            		where team = 'retail'
+            		group by moderator 
+            	 ) as total_requests_by_retail
+            	 
+            	 
+            -- AVG к-ть запитів для wholesale модератора (864)
+            
+            select 	
+            	round(avg(total_requests_by_wholesale.count_requests), 0) as avg_requests_wholesale
+            from (	select
+            			count(id_request) as count_requests,
+            			moderator
+            		from public.events
+            		where team = 'wholesale'
+            		group by moderator 
+            	 ) as total_requests_by_wholesale
+            
+            
+            -- AVG час виконання запиту для ТОП 10 модераторів retail
+            
+            select 
+            	date_trunc('second', avg(e.finish_time - e.start_time)) as avg_time_request_retail,
+            	t.moderator
+            from public.events as e
+            join	(	select
+            				count(id_request) as count_requests,
+            				moderator 
+            			from public.events
+            			where team = 'retail'
+            			group by moderator 
+            			order by count_requests desc
+            			limit 10
+            		)as t ON e.moderator = t.moderator
+            where e.team = 'retail'
+            group by t.moderator 
+            order by avg_time_request_retail desc
+            
+            
+            -- AVG час виконання запиту для ТОП 10 модераторів wholesale
+            
+            select 
+            	date_trunc('second', avg(e.finish_time - e.start_time)) as avg_time_request_wholesale,
+            	t.moderator
+            from public.events as e
+            join	(	select
+            				count(id_request) as count_requests,
+            				moderator 
+            			from public.events
+            			where team = 'wholesale'
+            			group by moderator 
+            			order by count_requests desc
+            			limit 10
+            		)as t ON e.moderator = t.moderator
+            where e.team = 'wholesale'
+            group by t.moderator 
+            order by avg_time_request_wholesale desc
+            
