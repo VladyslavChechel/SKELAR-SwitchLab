@@ -146,4 +146,34 @@
             where e.team = 'wholesale'
             group by t.moderator 
             order by avg_time_request_wholesale desc
+
+
+            -- Знаходимо розклад роботи модераторів та к-ть модераторів на зміні
+            
+            with work_time as 
+            	(
+            	select 
+            		moderator,
+            		team,
+            		start_time::date as work_day,
+            		to_char(MIN(start_time), 'HH24:MI:SS') as start_work,
+            		to_char(MAX(start_time), 'HH24:MI:SS')  as end_work
+            	from public.events
+            	group by
+            		moderator,
+            		start_time::date,
+            		team
+            	)
+            	
+            select 
+            	work_day,
+            	count(moderator) as total_moderator_on_shift,
+            	count(case when team = 'retail' then 1 end) as retail_moderator,  		--к-ть модераторів на зміні retail
+            	count(case when team = 'wholesale' then 1 end) as wholesale_moderator   --к-ть модераторів на зміні wholesale
+            from work_time
+            group by 
+            	work_day
+            order by 
+            	work_day 
+
             
