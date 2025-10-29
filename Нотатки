@@ -6,9 +6,9 @@
       178	163042	2020-09-30 15:56:08	2020-10-02 07:37:33	2020-10-02 07:47:57	retail	
 
 
-2)    Черновий аналіз даних
+2)     Аналіз даних
       
-      
+
             
             -- Кількість унікальних модераторів (49)
             
@@ -16,6 +16,7 @@
             select 
             	count(distinct moderator) 
             from public.events 
+            
             
             -- Кількість запитів (35 617)
             
@@ -31,12 +32,15 @@
             	min(request_time)
             from public.events
             
+            
             -- Остання дата запиту (2020-12-31 22:11:17)
             
             
             select 
             	max(request_time)
             from public.events
+            
+            
             
             -- Кількість запитів по командам (retail= 14025; wholesale= 21592 )
             
@@ -47,11 +51,27 @@
             where team = 'wholesale'
             
             
+            
+            -- Перевіряємо чи можуть оператори працювати у двох командах
+            select
+                moderator
+            from public.events
+            group by
+                moderator
+            having
+                
+                SUM(CASE WHEN team = 'retail' THEN 1 ELSE 0 END) > 0    
+                AND 
+                SUM(CASE WHEN team = 'wholesale' THEN 1 ELSE 0 END) > 0
+            
+            
+                
             -- Середній час обробки запиту (00:02:14)
             
             select 
             	avg(finish_time - start_time) as avg_request_time
             from public.events
+            
             
             
             -- Середній час обробки запиту для retail (00:01:58)
@@ -62,24 +82,54 @@
             where team = 'retail'
             
             
+            
             -- Середній час обробки запиту для wholesale (00:02:24)
             
             select 
             	avg(finish_time - start_time) as avg_request_time_wholesale
             from public.events
             where team = 'wholesale'
-
-
+            
+            select 
+            	percentile_cont(0.5) within group (order by (finish_time - start_time) ) as median
+            from public.events
+            
+            
             -- TOP запитів по модераторам 
-
+            
             select 
             	count(id_request) as total_requests_by_moderators,
             	moderator
             from public.events
             group by moderator 
-            order by total_requests_by_moderators 
-            -- Модератор № 188 виконав 3746 запитів, інші від 1717 і менше
-            -- Шість операторів виконали 2 запита або менше (ймовірно допомога старших модераторів або керівництва)
+            order by total_requests_by_moderators desc
+            -- Модератор № 188 виконав 3746 запитів, інші від 1717 і менше (дізнатись чому така велика різниця? Гіпотеза - автоматичні відповіді або вхід різних модераторів під одним ID)
+            -- Шість операторів виконали 2 запита або менше (ймовірно допомога старших модераторів або керівництва, відпустки, звільнення, переведення на інші посади або підрозділи)
+            
+            
+            -- Аналіз роботи модератора № 188 (При медіані виконання запиту за 43с., модератор виконав 148 запитів швидше 5 секунд. Схоже - бот або відповідь надавалась одним словом)
+            with moderator_188 as (
+            	select
+            		moderator,
+            		team,
+            		date_trunc('second', avg(finish_time - start_time)) as avg_time,
+            		PERCENTILE_CONT(0.5) within group (order by (finish_time - start_time)) as median,
+            		SUM(CASE WHEN (finish_time - start_time) < INTERVAL '5 seconds' THEN 1 ELSE 0 END) AS fast_requests_count
+            	from public.events
+            	where moderator = '188'
+            	group by 
+            		moderator,
+            		team
+            	
+            )
+            select 
+            	moderator,
+            	avg_time,
+            	median,
+            	fast_requests_count
+            from moderator_188
+            
+            
             
             
             -- AVG к-ть запитів для retail модератора (584)
@@ -125,10 +175,30 @@
             		)as t ON e.moderator = t.moderator
             where e.team = 'retail'
             group by t.moderator 
-            order by avg_time_request_retail desc
+            order by avg_time_request_retail 
             
             
             -- AVG час виконання запиту для ТОП 10 модераторів wholesale
+            -- Різниця середнього часу відповіді оператора 188 і решти, складає більше 38 сек
+            select 
+            	date_trunc('second', avg(e.finish_time - e.start_time)) as avg_time_request_wholesale,
+            	t.moderator
+            from public.events as e
+            join	(	select
+            				count(id_request) as count_requests,
+            				moderator 
+            			from public.events
+            			where team = 'wholesale'
+            			group by moderator 
+            			order by count_requests desc
+            			limit 10
+            		)as t ON e.moderator = t.moderator
+            where e.team = 'wholesale'
+            group by t.moderator 
+            order by avg_time_request_wholesale 
+            
+            
+            -- AVG час виконання запиту для BOTTOM 10 модераторів wholesale
             
             select 
             	date_trunc('second', avg(e.finish_time - e.start_time)) as avg_time_request_wholesale,
@@ -146,8 +216,23 @@
             where e.team = 'wholesale'
             group by t.moderator 
             order by avg_time_request_wholesale desc
-
-
+            
+            
+            -- К-ть запитів які виконувались більше 15хв., якщо дата початку та кінця виконання запиту співпадає (219 запитів)
+            
+            with time_request as(
+            	select
+            		finish_time - start_time as execution_time
+            	from public.events
+            	where (finish_time - start_time) > interval '15 minutes'
+            	AND start_time::DATE = finish_time::DATE
+            )
+            select 
+            	count(execution_time) as count_waiting_time
+            from time_request
+            
+            
+            
             -- Знаходимо розклад роботи модераторів та к-ть модераторів на зміні
             
             with work_time as 
@@ -169,11 +254,14 @@
             	work_day,
             	count(moderator) as total_moderator_on_shift,
             	count(case when team = 'retail' then 1 end) as retail_moderator,  		--к-ть модераторів на зміні retail
-            	count(case when team = 'wholesale' then 1 end) as wholesale_moderator   --к-ть модераторів на зміні wholesale
+            	count(case when team = 'wholesale' then 1 end) as wholesale_moderator         --к-ть модераторів на зміні wholesale
             from work_time
             group by 
             	work_day
             order by 
             	work_day 
+
+	
+
 
             
