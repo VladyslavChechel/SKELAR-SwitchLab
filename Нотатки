@@ -66,34 +66,21 @@
             
             
                 
-            -- Середній час обробки запиту (00:02:14)
-            
-            select 
-            	avg(finish_time - start_time) as avg_request_time
-            from public.events
-            
-            
-            
-            -- Середній час обробки запиту для retail (00:01:58)
-            
-            select 
-            	avg(finish_time - start_time) as avg_request_time_retail
-            from public.events
-            where team = 'retail'
-            
-            
-            
-            -- Середній час обробки запиту для wholesale (00:02:24)
-            
-            select 
-            	avg(finish_time - start_time) as avg_request_time_wholesale
-            from public.events
-            where team = 'wholesale'
-            
-            select 
-            	percentile_cont(0.5) within group (order by (finish_time - start_time) ) as median
-            from public.events
-            
+            -- час обробки запиту
+
+			select 
+				percentile_cont(0.5) within group (order by (finish_time - start_time) ) as median,
+				date_trunc('second', avg(finish_time - start_time)) as avg_request_time, -- Середній час обробки запиту (00:02:14)
+				date_trunc('second',avg(                           
+					case when team = 'retail' then finish_time - start_time
+					end)) as avg_request_time_retail,                                    -- Середній час обробки запиту для retail (00:01:58)
+				date_trunc('second', avg(
+					case when team = 'wholesale' then finish_time - start_time
+					end)) as avg_request_time_wholesale                                  -- Середній час обробки запиту для wholesale (00:02:24)
+				
+			from public.events
+			
+			            
             
             -- TOP запитів по модераторам 
             
