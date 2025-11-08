@@ -14,13 +14,17 @@ create table public.events(
       
 
             
- select 
+ 
+
+
+select 
 	count(distinct moderator) as unique_moderators,					-- Кількість унікальних модераторів
 	count( id_request) as total_requests,							-- Кількість запитів
 	 min(request_time)::date as first_date_requests, 				--Перша дата запиту 
 	 max(request_time)::date as last_date_requests,	 				-- Остання дата запиту
 	 count(team) filter (where team = 'wholesale') as wholesale,  	--Кількість запитів по командам
-	 count(team) filter (where team = 'retail') as retail			--Кількість запитів по командам
+	 count(team) filter (where team = 'retail') as retail 			--Кількість запитів по командам
+	 
 from public.events 
 
 
@@ -31,17 +35,40 @@ from public.events
 group by
     moderator
 having
-    
     SUM(CASE WHEN team = 'retail' THEN 1 ELSE 0 END) > 0    
     AND 
     SUM(CASE WHEN team = 'wholesale' THEN 1 ELSE 0 END) > 0
 
 
-    
+-- Перевірка середнього значення запитів по командам
+
+WITH DailyRetailRequests as (
+    --  Групуємо за днем, шукаємо коли надійшов запит
+    select
+        request_time::date as work_day,
+        count(id_request) as daily_requests
+    from
+        public.events
+    where
+        team = 'wholesale'
+		--Змінюємо на 'wholesale'
+    group by
+        work_day
+)
+select
+    --  середнє значення щоденних запитів за весь період
+    round(avg(daily_requests), 0) as avg_daily_requests_retail
+    -- теж саме для 'wholesale'
+from
+    DailyRetailRequests
+where 
+	 work_day::date > '2020-10-28';
+
+
 -- час обробки запиту
 
 select 
-	percentile_cont(0.5) within group (order by (finish_time - start_time) ) as median,
+	
 	date_trunc('second', avg(finish_time - start_time)) as avg_request_time, -- Середній час обробки запиту (00:02:14)
 	date_trunc('second',avg(                           
 		case when team = 'retail' then finish_time - start_time
@@ -54,7 +81,7 @@ from public.events
 
 
 
--- TOP запитів по модераторам 
+-- запити по модераторам 
 
 select 
 	count(id_request) as total_requests_by_moderators,
@@ -62,24 +89,32 @@ select
 from public.events
 group by moderator 
 order by total_requests_by_moderators desc
--- Модератор № 188 виконав 3746 запитів, інші від 1717 і менше (дізнатись чому така велика різниця? Гіпотеза - автоматичні відповіді або вхід різних модераторів під одним ID)
--- Шість операторів виконали 2 запита або менше (ймовірно допомога старших модераторів або керівництва, відпустки, звільнення, переведення на інші посади або підрозділи)
 
 
--- Аналіз роботи модератора № 188 (При медіані виконання запиту за 43с., модератор виконав 148 запитів швидше 5 секунд. Схоже - бот або відповідь надавалась одним словом)
+-- Перевіряємо роботу конкретних модераторів
+
+	select 
+		count(id_request) as total_requests_by_moderators,
+		moderator,
+		start_time 
+	from public.events
+	where moderator = '150'
+	group by moderator, start_time 
+
+
+-- Аналіз роботи модератора № 188 (виконав 148 запитів швидше 5 секунд. Схоже - бот або відповідь надавалась одним словом)
 with moderator_188 as (
 	select
 		moderator,
 		team,
 		date_trunc('second', avg(finish_time - start_time)) as avg_time,
 		PERCENTILE_CONT(0.5) within group (order by (finish_time - start_time)) as median,
-		SUM(CASE WHEN (finish_time - start_time) < INTERVAL '5 seconds' THEN 1 ELSE 0 END) AS fast_requests_count
+		SUM(CASE WHEN (finish_time - start_time) < INTERVAL '2 seconds' THEN 1 ELSE 0 END) AS fast_requests_count
 	from public.events
 	where moderator = '188'
 	group by 
 		moderator,
 		team
-	
 )
 select 
 	moderator,
@@ -90,7 +125,7 @@ from moderator_188
 
 
 
--- Денне навантаження на модератора
+-- Денне середнє навантаження на модератора
 	 
 	 with daily_requests_per_moderator as (
 	 	select 
@@ -111,14 +146,32 @@ from moderator_188
 	 	round(avg(case when team = 'retail' then t.daily_requests end ), 0) as avg_daily_requests_retail,
 	 	round(avg(case when team = 'wholesale' then t.daily_requests end ), 0) as avg_daily_requests_wholesale
 	 from daily_requests_per_moderator as t
+
 	 
+	-- Аналіз к-ті модераторів на зміні
+	
+	 select
+    request_time::date AS work_day,
+    team,
+    count(id_request) AS daily_requests_received,
+    count(DISTINCT moderator) AS active_moderators_on_shift  
+from
+    public.events 
+group by
+    request_time::date, 
+    team
+order by
+    work_day, 
+    team;
+
 	 
 
--- AVG час виконання запиту для ТОП 10 модераторів retail
+-- AVG час виконання запиту для модераторів retail
 
 select 
 	date_trunc('second', avg(e.finish_time - e.start_time)) as avg_time_request_retail,
-	t.moderator
+	t.moderator,
+	t.count_requests as requests_by_moderators
 from public.events as e
 join	(	select
 				count(id_request) as count_requests,
@@ -127,18 +180,20 @@ join	(	select
 			where team = 'retail'
 			group by moderator 
 			order by count_requests desc
-			limit 10
 		)as t ON e.moderator = t.moderator
 where e.team = 'retail'
-group by t.moderator 
+group by 
+	t.moderator,
+	t.count_requests
 order by avg_time_request_retail 
 
 
--- AVG час виконання запиту для ТОП 10 модераторів wholesale
--- Різниця середнього часу відповіді оператора 188 і решти, складає більше 38 сек
+-- AVG час виконання запиту для модераторів wholesale
+
 select 
 	date_trunc('second', avg(e.finish_time - e.start_time)) as avg_time_request_wholesale,
-	t.moderator
+	t.moderator,
+	t.count_requests as requests_by_moderators
 from public.events as e
 join	(	select
 				count(id_request) as count_requests,
@@ -147,45 +202,13 @@ join	(	select
 			where team = 'wholesale'
 			group by moderator 
 			order by count_requests desc
-			limit 10
 		)as t ON e.moderator = t.moderator
 where e.team = 'wholesale'
-group by t.moderator 
+group by 
+	t.moderator,
+	t.count_requests 
 order by avg_time_request_wholesale 
 
-
--- AVG час виконання запиту для BOTTOM 10 модераторів wholesale
-
-select 
-	date_trunc('second', avg(e.finish_time - e.start_time)) as avg_time_request_wholesale,
-	t.moderator
-from public.events as e
-join	(	select
-				count(id_request) as count_requests,
-				moderator 
-			from public.events
-			where team = 'wholesale'
-			group by moderator 
-			order by count_requests desc
-			limit 10
-		)as t ON e.moderator = t.moderator
-where e.team = 'wholesale'
-group by t.moderator 
-order by avg_time_request_wholesale desc
-
-
--- К-ть запитів які виконувались більше 15хв., якщо дата початку та кінця виконання запиту співпадає (219 запитів)
-
-with time_request as(
-	select
-		finish_time - start_time as execution_time
-	from public.events
-	where (finish_time - start_time) > interval '15 minutes'
-	AND start_time::DATE = finish_time::DATE
-)
-select 
-	count(execution_time) as count_waiting_time
-from time_request
 
 
 
@@ -216,3 +239,325 @@ group by
 	work_day
 order by 
 	work_day 
+	
+	
+	
+-- Оптимізація коду для подальшого завантаження в Tableau
+	
+	-- Агрегуємо дані до рівня ДЕНЬ
+	
+WITH DailyActivity AS (
+    select
+        moderator,
+        team,
+        start_time::date as work_day,
+        count(id_request) as daily_requests, 
+        -- Обчислюємо СУМАРНИЙ час, витрачений модератором за день
+        sum(finish_time - start_time) as total_time_per_moderator
+    from
+        public.events
+    group by 
+        moderator, 
+        team, 
+        work_day
+)
+select
+    da.work_day,
+    count(da.moderator) AS total_moderator_on_shift, 
+    count(CASE WHEN da.team = 'retail' THEN 1 END) as retail_moderators,
+    count(CASE WHEN da.team = 'wholesale' THEN 1 END) as wholesale_moderators,
+    
+    -- Навантаження (Запити)
+    sum(CASE WHEN da.team = 'retail' THEN da.daily_requests END) as total_daily_req_retail,
+    sum(CASE WHEN da.team = 'wholesale' THEN da.daily_requests END) as total_daily_req_wholesale,
+
+    -- Середнє навантаження по командам
+    round(avg(CASE WHEN da.team = 'retail' THEN da.daily_requests END), 0) as avg_daily_req_retail,
+    round(avg(CASE WHEN da.team = 'wholesale' THEN da.daily_requests END), 0) as avg_daily_req_wholesale,
+    
+    -- Загальний час, витрачений на всі запити за день (в секундах)
+    EXTRACT(EPOCH from sum(da.total_time_per_moderator)) as total_time_spent_sec_daily,
+
+    -- Середній час обробки (в секундах)
+    EXTRACT(EPOCH from avg(da.total_time_per_moderator / da.daily_requests)) as avg_time_per_request_daily
+from
+    DailyActivity da
+group by
+    da.work_day
+order by
+    da.work_day;
+    
+  
+	-- Другий файл
+    -- Агрегуємо дані для деталізації по МОДЕРАТОРАХ
+    
+  WITH DailyActivity as (
+    select
+        moderator,
+        team,
+        start_time::date as work_day,
+        count(id_request) as daily_requests, 
+        -- Обчислюємо СУМАРНИЙ час, витрачений модератором за день
+        sum(finish_time - start_time) as total_time_per_moderator 
+    from
+        public.events
+    group by 
+        moderator, 
+        team, 
+        work_day
+)
+select
+    da.work_day,
+    da.moderator, 
+    da.team,
+    da.daily_requests,
+    da.total_time_per_moderator,
+    -- Середній час обробки 
+    EXTRACT(EPOCH FROM da.total_time_per_moderator) / da.daily_requests as avg_time_per_request_sec 
+from
+    DailyActivity da
+order by
+    da.work_day,
+    da.moderator;
+    
+  
+    
+    -- Третій файл
+    
+    
+select
+    -- Загальна інформація
+    count(DISTINCT moderator) as unique_moderators,
+    count(id_request) as total_requests,
+    MIN(request_time)::date as first_date_requests,
+    MAX(request_time)::date as last_date_requests,
+
+    count(team) FILTER (WHERE team = 'wholesale') as total_wholesale_requests,
+    count(team) FILTER (WHERE team = 'retail') as total_retail_requests,
+
+    -- Рахуємо кількість запитів, на які відреагували довше ніж 15 хвилин
+    SUM(CASE 
+        WHEN (start_time - request_time) > INTERVAL '15 minutes' 
+        THEN 1 
+        ELSE 0 
+    END) as over_fifteen_min_response,
+    
+    -- Рахуємо кількість запитів, на які відреагували довше ніж 45 хвилин
+    SUM(CASE 
+        WHEN (start_time - request_time) > INTERVAL '45 minutes' 
+        THEN 1 
+        ELSE 0 
+    END) as over_fortyfive_min_response,
+
+    --  Середній Час Реакції (Response Time) за командами 
+    EXTRACT(EPOCH FROM AVG(CASE WHEN team = 'retail' THEN start_time - request_time END)) as avg_response_time_retail_sec,
+    EXTRACT(EPOCH FROM AVG(CASE WHEN team = 'wholesale' THEN start_time - request_time END)) as avg_response_time_wholesale_sec
+    
+from
+    public.events
+where
+    start_time::date >= date '2020-10-01'
+    AND start_time::date NOT BETWEEN date '2020-10-22' AND date '2020-10-28';
+    
+    
+-- Кількість робочих днів модераторів
+    
+    SELECT
+    moderator,
+    team,
+    count(DISTINCT start_time::date) as total_work_days  
+from
+    public.events
+group by
+    moderator,
+    team
+order by
+    team,
+    total_work_days desc;
+
+
+-- Модератор-День
+
+
+SELECT
+    moderator,
+    team,
+    start_time::date as work_day,
+    count(id_request) as requests_handled, -- оброблених модератором за день
+    sum(finish_time - start_time) as total_time_per_moderator_daily, -- Сумарний час модератора за день
+    -- Середній час на запит 
+    EXTRACT(EPOCH FROM (sum(finish_time - start_time) / count(id_request))) as avg_time_per_request_sec 
+    
+from
+    public.events
+group by 
+    moderator, 
+    team, 
+    work_day
+order by
+    work_day,
+    requests_handled,
+    total_time_per_moderator_daily
+    ;
+	
+
+-- К-ть запитів виконаних в межах 15 та 45хв по модераторам
+
+select
+    moderator,
+    team,
+    start_time::date as work_day,
+    COUNT(id_request) as daily_requests,
+    
+    PERCENTILE_CONT(0.5) WITHIN GROUP (
+        order by EXTRACT(EPOCH from (finish_time - start_time))
+    ) as median_time_per_request_sec,
+    
+    -- час реакції
+    PERCENTILE_CONT(0.5) WITHIN GROUP (
+        order by EXTRACT(EPOCH from (start_time - request_time))
+    ) as median_response_time_sec,
+
+    -- % запитів в межах 15 хв.
+    (CAST(sum(CASE 
+        WHEN EXTRACT(EPOCH from (start_time - request_time)) <= 900 
+        THEN 1 ELSE 0 
+    END) as DECIMAL) * 100.0) / count(id_request) as response_fifteen_min_percentage,
+    --  % запитів в межах 45 хв.
+    (CAST(sum(CASE 
+        WHEN EXTRACT(EPOCH from (start_time - request_time)) <= 2700 
+        THEN 1 ELSE 0 
+    END) as DECIMAL) * 100.0) / count(id_request) as response_fortyfive_min_percentage
+    
+from
+    public.events
+where
+    start_time::date >= date '2020-10-01'
+    AND start_time::date NOT BETWEEN date '2020-10-22' AND date '2020-10-28'
+group by
+    moderator,
+    team,
+    work_day
+order by
+    work_day,
+    moderator;
+
+
+-- % запитів виконаних в межах 15 та 45хв по командах
+
+select
+    team,
+    start_time::date as work_day,
+    count(id_request) as total_daily_requests,
+	--  РЕАКЦІЇ (Response Time)
+    PERCENTILE_CONT(0.5) WITHIN GROUP (
+        ORDER BY EXTRACT(EPOCH FROM (start_time - request_time))
+    ) as median_response_time_sec,
+    
+    --  ОБРОБКИ (Handling Time)
+    PERCENTILE_CONT(0.5) WITHIN GROUP (
+        ORDER BY EXTRACT(EPOCH FROM (finish_time - start_time))
+    ) as median_handling_time_sec,
+    
+    --  % Реакції (Ціль 15 хв)
+    (CAST(sum(CASE 
+        WHEN EXTRACT(EPOCH from (start_time - request_time)) <= 900 
+        THEN 1 
+        ELSE 0 
+    END) as DECIMAL) * 100.0) / count(id_request) as response_fifteen_min_percentage,
+    -- % Реакції (Ціль 45 хв)
+    (CAST(SUM(CASE 
+        WHEN EXTRACT(EPOCH from (start_time - request_time)) <= 2700 
+        THEN 1 
+        ELSE 0 
+    END) as DECIMAL) * 100.0) / count(id_request) as response_fortyfive_min_percentage
+    
+from
+    public.events
+where
+    start_time::date >= date '2020-10-01'
+    AND start_time::date NOT BETWEEN date '2020-10-22' AND date '2020-10-28'
+group by 
+    team, 
+    work_day
+order by
+    work_day,
+    team;
+
+
+--Пікові навантаження та к-ть активних модераторів
+
+WITH DailyHourlyDemand as (
+    -- Розраховуємо НАВАНТАЖЕННЯ для кожної години
+    select
+        e.team,
+        e.request_time::date as work_day,
+        -- Година дня
+        EXTRACT(HOUR from e.request_time) as request_hour,
+        -- Кількість запитів за цю годину
+        count(e.id_request) as daily_requests_per_hour
+    from
+        public.events e
+    where
+        e.request_time::date >= date '2020-10-01'
+        AND e.request_time::date NOT BETWEEN date '2020-10-22' AND date '2020-10-28'
+    group by
+        1, 2, 3
+),
+HourlyDemand as (
+    -- Середнє навантаження за весь період
+    select
+        team,
+        request_hour,
+        -- Середнє запитів для цієї години
+        avg(daily_requests_per_hour) as avg_requests_per_hour
+    from
+        DailyHourlyDemand
+    group by
+        1, 2
+),
+HourlyModerators as (
+    --  Розраховуємо СЕРЕДНЮ КІЛЬКІСТЬ МОДЕРАТОРІВ
+    select
+        EXTRACT(HOUR from start_time) as request_hour,
+        e.team,
+        avg(CAST(t.daily_moderators as NUMERIC)) as avg_active_moderators_hourly
+    from
+        public.events e
+    join (
+        -- К-ть унікальних модераторів  ДЕНЬ-ГОДИНА
+        select
+            team,
+            start_time::date as work_day,
+            EXTRACT(HOUR from start_time) as request_hour,
+            count(DISTINCT moderator) as daily_moderators
+        from
+            public.events
+        where
+            start_time IS NOT NULL
+            AND start_time::date >= date '2020-10-01'
+            AND start_time::date NOT BETWEEN date '2020-10-22' AND date '2020-10-28'
+        group by 1, 2, 3
+    ) AS t ON 
+        e.team = t.team AND 
+        e.start_time::date = t.work_day AND 
+        EXTRACT(HOUR from e.start_time) = t.request_hour
+    WHERE
+        e.start_time IS NOT NULL
+    group by
+        1, 2
+)
+select
+    d.request_hour,
+    d.team,
+    -- ВИКОРИСТОВУЄМО СЕРЕДНЄ НАВАНТАЖЕННЯ
+    d.avg_requests_per_hour,
+    COALESCE(m.avg_active_moderators_hourly, 0) as avg_active_moderators_hourly
+from
+    HourlyDemand d
+full join
+    HourlyModerators m
+    ON d.request_hour = m.request_hour AND d.team = m.team
+order by
+    d.team,
+    d.request_hour;
