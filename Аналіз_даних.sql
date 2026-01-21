@@ -10,12 +10,9 @@ create table public.events(
 );
 
 
-Аналіз даних
+
+--Аналіз даних
       
-
-            
- 
-
 
 select 
 	count(distinct moderator) as unique_moderators,					-- Кількість унікальних модераторів
