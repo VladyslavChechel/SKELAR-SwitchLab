@@ -1,12 +1,12 @@
-1) Звернути увагу на дати отримання перших запитів та час взяття в роботу. Чи повпливають вони на загальну статистику?
+/* Звернути увагу на дати отримання перших запитів та час взяття в роботу. Чи повпливають вони на загальну статистику?
       165	159660	2020-09-24 07:01:16	2020-10-01 16:00:31	2020-10-01 16:02:02	retail	
       178	160116	2020-09-24 22:32:15	2020-10-01 13:21:42	2020-10-01 13:21:43	retail	
       187	160178	2020-09-25 02:58:13	2020-10-02 11:37:16	2020-10-02 11:41:56	wholesale	
       178	160306	2020-09-25 09:44:12	2020-10-02 07:23:09	2020-10-02 07:25:33	retail	
       178	163042	2020-09-30 15:56:08	2020-10-02 07:37:33	2020-10-02 07:47:57	retail	
+*/
 
-
-2)     Аналіз даних
+     --Аналіз даних
       
 
             
@@ -213,7 +213,29 @@ group by
 order by 
 	work_day 
 
-	
+
+
+
+--Запити по годинах кожного дня
+WITH DailyHourly AS (
+    SELECT
+        team,
+        request_time::date AS work_day,
+        EXTRACT(DOW FROM request_time) AS day_of_week, -- 0 = Sunday
+        EXTRACT(HOUR FROM request_time) AS hour_of_day,
+        COUNT(*) AS requests_per_hour
+    FROM public.events
+    GROUP BY 1, 2, 3, 4
+)
+SELECT
+    team,
+    day_of_week,
+    ROUND(AVG(requests_per_hour), 1) AS avg_requests_per_hour,
+    PERCENTILE_CONT(0.9)
+        WITHIN GROUP (ORDER BY requests_per_hour) AS p90_requests_per_hour
+FROM DailyHourly
+GROUP BY 1, 2
+ORDER BY team, day_of_week;
 
 
             
